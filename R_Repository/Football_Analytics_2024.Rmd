@@ -1,0 +1,791 @@
+---
+title: "Retrospective Evaluation of Soccer Players (REvSoc)"
+author: "Seshadhri S"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  html_document: default
+---
+Github Credentials:
+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
+
+
+# 2024-25 season
+## Goalkeeper Rating System: Methodology & Validation
+In this analysis, I developed a multidimensional goalkeeper rating model designed to evaluate both conventional and modern aspects of goalkeeping performance. The model incorporates traditional shot-stopping metrics alongside advanced measures of distribution, sweeping actions, and cross management to reflect the evolving demands of the position.
+
+### Method Overview
+The rating was divided into two core components:
+
+Conventional Keeper Rating (CKR) — incorporating metrics like Saves, Goals Against (GA), Save Percentage, and Post-Shot Expected Goals (PSxG) overperformance.
+
+Sweeper Keeper Rating (SKR) — capturing distribution accuracy, launch rates, defensive actions outside the box, average distance of defensive actions, and cross-stopping percentages.
+
+Both components were normalized relative to their averages and combined to produce a Total Goalkeeper Rating.
+
+### Validation Process
+
+To ensure the model was both credible and informative, I validated the Total Goalkeeper Rating against three independent metrics:
+
+1. Goals Against (GA)
+
+2. PSxG-GA per 90 (shot-stopping over expected)
+
+3. Save Percentage
+
+
+```{r}
+
+library(worldfootballR)
+library(purrr)
+library(dplyr)
+library(Boruta)
+library(tidyverse)
+library(FactoMineR)
+library(factoextra)
+library(ggrepel)
+
+```
+
+## Load in FBRef Data for the Big 5 Leagues
+
+```{r}
+big5_player_standard <- fb_big5_advanced_season_stats(season_end_year= 2024, stat_type= "standard", team_or_player= "player")
+big5_player_shooting <- fb_big5_advanced_season_stats(season_end_year= 2025, stat_type= "shooting", team_or_player= "player")
+big5_player_passing <- fb_big5_advanced_season_stats(season_end_year= 2025, stat_type= "passing", team_or_player= "player")
+big5_player_passing_types <- fb_big5_advanced_season_stats(season_end_year= 2025, stat_type= "passing_types", team_or_player= "player")
+big5_player_gca <- fb_big5_advanced_season_stats(season_end_year= 2025, stat_type= "gca", team_or_player= "player")
+big5_player_defense <- fb_big5_advanced_season_stats(season_end_year= 2025, stat_type= "defense", team_or_player= "player")
+big5_player_possession <- fb_big5_advanced_season_stats(season_end_year= 2025, stat_type= "possession", team_or_player= "player")
+big5_player_playing_time <- fb_big5_advanced_season_stats(season_end_year= 2025, stat_type= "playing_time", team_or_player= "player")
+big5_player_misc <- fb_big5_advanced_season_stats(season_end_year= 2025, stat_type= "misc", team_or_player= "player")
+big5_player_keepers <- fb_big5_advanced_season_stats(season_end_year= 2025, stat_type= "keepers", team_or_player= "player")
+big5_player_keepers_adv <- fb_big5_advanced_season_stats(season_end_year= 2025, stat_type= "keepers_adv", team_or_player= "player")
+
+prem_league_table <- fb_season_team_stats(country = "ENG", gender = "M", season_end_year = "2025", tier = "1st", stat_type = "league_table") %>% arrange(desc(Pts))
+seriea_league_table <- fb_season_team_stats(country = "ITA", gender = "M", season_end_year = "2025", tier = "1st", stat_type = "league_table") %>% arrange(desc(Pts))
+ligue1_league_table <- fb_season_team_stats(country = "FRA", gender = "M", season_end_year = "2025", tier = "1st", stat_type = "league_table") %>% arrange(desc(Pts))
+laliga_league_table <- fb_season_team_stats(country = "ESP", gender = "M", season_end_year = "2025", tier = "1st", stat_type = "league_table") %>% arrange(desc(Pts))
+bundesliga_league_table <- fb_season_team_stats(country = "GER", gender = "M", season_end_year = "2025", tier = "1st", stat_type = "league_table") %>% arrange(desc(Pts))
+
+```
+
+## Goalkeeper Ratings
+
+```{r}
+##------Goalkeeper----
+#>Have to divide this into Conventional Keeper Rating (CKR) and Sweeper Keeper Rating (SKR)
+#>Take the keepers away from the playing times dataframe
+
+gk_playing_time <- big5_player_playing_time %>% filter(Pos == "GK") %>% filter(MP_Playing.Time != 0)
+
+df_list <- list(gk_playing_time, big5_player_keepers, big5_player_keepers_adv)
+common_columns <- Reduce(intersect, lapply(df_list, colnames))
+
+merged_df <- inner_join(big5_player_keepers, big5_player_keepers_adv, gk_playing_time, by = c("Season_End_Year", "Squad", "Comp", "Player", "Nation", "Pos", "Age", "Born", "Url"))
+
+gk_above_900 <- merged_df %>% filter(Min_Playing >= 900)
+
+keepers_numeric <-gk_above_900 %>% select(where(is.numeric))
+
+# Optional: remove NAs
+keepers_numeric <- keepers_numeric[, -1]
+keepers_numeric <- na.omit(keepers_numeric)
+
+# Scale the data (important for PCA since units differ)
+keepers_scaled <- scale(keepers_numeric)
+keepers_scaled <- keepers_scaled[ ,-1]
+# Run PCA
+keepers_pca <- PCA(keepers_scaled, graph = FALSE)
+
+# View eigenvalues (variance explained by each component)
+keepers_pca$eig
+
+# Extract variance explained by Dim.1 and Dim.2
+dim1_variance <- keepers_pca$eig[1, "percentage of variance"]
+dim2_variance <- keepers_pca$eig[2, "percentage of variance"]
+
+# Normalize so they sum to 1 (as relative weights)
+total_variance <- dim1_variance + dim2_variance
+dim1_weight <- dim1_variance / total_variance
+dim2_weight <- dim2_variance / total_variance
+
+print(paste("Dim.1 weight:", round(dim1_weight, 3)))
+print(paste("Dim.2 weight:", round(dim2_weight, 3)))
+
+
+
+# Plot the variance explained
+fviz_eig(keepers_pca)
+
+# Biplot (players and variables on first two PCs)
+fviz_pca_biplot(keepers_pca, repel = TRUE)
+
+# Contributions of variables to PC1 and PC2
+fviz_pca_var(keepers_pca, 
+             col.var = "contrib",
+             labelsize = 2, repel = TRUE) 
+
+variable_contrib <- data.frame(keepers_pca$var$contrib)
+variable_contrib <- variable_contrib %>%
+  mutate(Total_Contrib = Dim.1 + Dim.2)
+
+# Scale them to sum to 1 (to act as relative weights)
+variable_contrib <- variable_contrib %>%
+  mutate(Weight = Total_Contrib / sum(Total_Contrib))
+
+# 75th percentile threshold
+threshold_75 <- quantile(variable_contrib$Total_Contrib, 0.75)
+print(threshold_75)
+
+# Sorted plot
+sorted_scores <- sort(variable_contrib$Total_Contrib, decreasing = TRUE)
+plot(sorted_scores, type = "l", col = "blue", main = "PCA Score Distribution",
+     ylab = "PCA Score (Dim1 + Dim2)", xlab = "Ranked Goalkeepers")
+
+
+# Find the elbow point
+elbow <- inflection::findiplist(1:length(sorted_scores), sorted_scores, 0)
+print(elbow)
+
+mean_score <- mean(variable_contrib$Total_Contrib)
+sd_score <- sd(variable_contrib$Total_Contrib)
+
+threshold_sd <- mean_score + sd_score
+print(threshold_sd)
+
+plot(density(variable_contrib$Total_Contrib), main = "Density of PCA Scores")
+abline(v = mean_score, col = "red", lty = 2)
+
+```
+
+The PCA variable contribution plot shows a clear differentiation between shot stopping and sweeper keeper metrics
+
+1. OPA_per_90_Sweeper and AvgDist_Sweeper are almost overlapping and long - These two are very closely related and both contribute heavily to PC1.
+TL;DR: your sweeper keeper stats move together and drive a big chunk of the differences between keepers.
+
+2. PSxG+_per__minus__Expected (the expected goals prevented stat) points in a different direction and is quite long too - Strongly influential but not correlated with the sweeper actions. It’s carrying weight independently, probably defining a classic shot-stopper profile.
+
+3. Cmp_percent_Launched and Stp_percent_Crosses have shorter vectors, contributing less to the variance on these first two components.
+Could mean they’re either:
+
+- Less variable between your keepers
+
+- Or important on other PCs (PC3, PC4…)
+```{r}
+
+CKR <- with(gk_above_900,
+  (Min_Playing * 
+   Saves * variable_contrib["Saves", "Weight"] *
+   PSxG_Expected * variable_contrib["PSxG_Expected", "Weight"]) /
+  (GA * variable_contrib["GA", "Weight"] * GA * SoTA * variable_contrib["SoTA", "Weight"])
+)
+
+SKR <- with(gk_above_900,
+  (
+    (Cmp_Launched/Att_Launched) * variable_contrib["Cmp_Launched", "Weight"] +
+    (Stp_Crosses/Opp_Crosses) * variable_contrib["Stp_Crosses", "Weight"] +
+    (AvgLen_Passes/`Att (GK)_Passes`) * variable_contrib["AvgLen_Passes", "Weight"] +
+    (AvgDist_Sweeper/`#OPA_Sweeper`) * variable_contrib["AvgDist_Sweeper", "Weight"] +
+    (AvgLen_Goal/Att_Goal) * variable_contrib["AvgLen_Goal", "Weight"]
+  ) / Min_Playing
+)
+
+avg_CKR <- mean(CKR, na.rm = TRUE)
+avg_SKR <- mean(SKR, na.rm = TRUE)
+
+CKR_Avg <- CKR / avg_CKR
+SKR_Avg <- SKR / avg_SKR
+
+Total_GK_Rating <- (CKR_Avg * dim1_weight) + (SKR_Avg * dim2_weight)
+
+gk_ratings_final <- gk_above_900 %>% 
+  mutate(
+    CKR_Avg = CKR_Avg,
+    SKR_Avg = SKR_Avg,
+    Total_GK_Rating = Total_GK_Rating
+  ) %>%
+  arrange(desc(Total_GK_Rating))
+
+gk_ratings_24starts <- gk_ratings_final %>% filter(Starts_Playing >=25) %>% select(Squad, Comp, Player, CKR_Avg, SKR_Avg, Total_GK_Rating)
+print(head(gk_ratings_24starts))
+
+#Correlation work between GA and GKR
+
+cor(gk_ratings_final$Total_GK_Rating, gk_ratings_final$GA, use = "complete.obs", method = "spearman")
+cor(gk_ratings_final$Total_GK_Rating, gk_ratings_final$`PSxG+_per__minus__Expected`, use = "complete.obs", method = "spearman")
+cor(gk_ratings_final$Total_GK_Rating, (gk_ratings_final$PSxG_Expected - gk_ratings_final$GA) / (gk_ratings_final$Min_Playing / 90), method = "spearman")
+cor(gk_ratings_final$Total_GK_Rating, gk_ratings_final$Save_percent, use = "complete.obs", method = "spearman")
+
+
+gk_ratings_league_avg <- gk_ratings_final %>% group_by(Comp) %>% summarise(Avg_GKR = mean(Total_GK_Rating)) 
+print(gk_ratings_league_avg)
+gk_psxg_league_avg <- gk_ratings_final %>% group_by(Comp) %>% summarise(Avg_PSxG = mean(PSxG_Expected))
+print(gk_psxg_league_avg)
+cor(gk_ratings_league_avg$Avg_GKR, gk_psxg_league_avg$Avg_PSxG, method = "spearman")
+
+#Split them into Each League
+
+pl_gk_ratings <- gk_ratings_final %>% filter(Comp == "Premier League")
+bundesliga_gk_ratings <- gk_ratings_final %>% filter(Comp == "Bundesliga")
+seriea_gk_ratings <- gk_ratings_final %>% filter(Comp == "Serie A")
+ligue1_gk_ratings <- gk_ratings_final %>% filter(Comp == "Ligue 1")
+laliga_gk_ratings <- gk_ratings_final %>% filter(Comp == "La Liga")
+
+#Awards for each league
+pl_gk_ratings_awards <- gk_ratings_24starts %>% filter(Comp == "Premier League")
+bundesliga_gk_ratings_awards <- gk_ratings_24starts %>% filter(Comp == "Bundesliga")
+seriea_gk_ratings_awards <- gk_ratings_24starts %>% filter(Comp == "Serie A")
+ligue1_gk_ratings_awards <- gk_ratings_24starts %>% filter(Comp == "Ligue 1")
+laliga_gk_ratings_awards <- gk_ratings_24starts %>% filter(Comp == "La Liga")
+```
+
+### Interpretation
+
+These correlations confirm that the model is strongly aligned with key outcome metrics while maintaining balance:
+
+High correlation with Goals Against indicates outcome relevance.
+
+Moderate correlations with PSxG-GA per 90 and Save Percentage confirm the model’s shot-stopping validity without overfitting to a single dimension.
+
+The moderate strength of these relationships reflects the rating’s inclusion of modern, non-shot-stopping actions, enhancing its relevance to contemporary goalkeeper profiles.
+
+### Conclusion
+
+This multidimensional rating offers a more comprehensive view of goalkeeper performance than conventional single-metric models. It captures the hybrid nature of the modern goalkeeper — one expected to contribute both in traditional shot-stopping and proactive defensive play — and stands up well to statistical validation against key performance outcomes.
+
+## Outfield Player Ratings
+### Defensive Player Ratings
+
+```{r}
+#>DEFENSIVE PLAYER RATING
+
+outfield_playing_time <- big5_player_playing_time %>% filter(Pos != "GK") %>% filter(Min_Playing.Time >=900)
+outfield_df_list <- list(outfield_playing_time, big5_player_defense, big5_player_gca, big5_player_misc, 
+                         big5_player_passing, big5_player_passing_types, big5_player_possession,
+                         big5_player_shooting, big5_player_standard)
+common_columns_outfield <- Reduce(intersect, lapply(outfield_df_list, colnames))
+print(common_columns_outfield)
+
+outfield_data <- outfield_df_list %>%
+  reduce(left_join, by = c("Season_End_Year", "Squad", "Comp", "Player", "Nation", "Pos", "Age", "Born", "Url"))
+outfield_data <- outfield_data %>%
+  select(-Url)
+
+outfield_defensive_data <- outfield_data %>% select(Season_End_Year, Squad, Comp, Player, Nation, Pos, Age, Min_Playing.Time, Tkl_Tackles, TklW_Tackles, Tkl_Challenges, Att_Challenges, Blocks_Blocks, Int.x, Clr, Err, CrdY.y, CrdR.y, Recov, Fls, Fld, Recov, Won_Aerial, Lost_Aerial)
+
+outfield_above_900 <- outfield_defensive_data %>% filter(Min_Playing.Time >= 900)
+
+outfield_numeric <-outfield_above_900 %>% select(where(is.numeric))
+
+# Optional: remove NAs
+outfield_numeric <- outfield_numeric[, -1]
+outfield_numeric <- na.omit(outfield_numeric)
+
+# Scale the data (important for PCA since units differ)
+outfield_scaled <- scale(outfield_numeric)
+outfield_scaled <- outfield_scaled[ ,-1]
+# Run PCA
+outfield_pca <- PCA(outfield_scaled, graph = FALSE)
+
+# View eigenvalues (variance explained by each component)
+outfield_pca$eig
+
+# Extract variance explained by Dim.1 and Dim.2
+dim1_variance <- outfield_pca$eig[1, "percentage of variance"]
+dim2_variance <- outfield_pca$eig[2, "percentage of variance"]
+
+# Normalize so they sum to 1 (as relative weights)
+total_variance <- dim1_variance + dim2_variance
+dim1_weight <- dim1_variance / total_variance
+dim2_weight <- dim2_variance / total_variance
+
+print(paste("Dim.1 weight:", round(dim1_weight, 3)))
+print(paste("Dim.2 weight:", round(dim2_weight, 3)))
+
+
+
+# Plot the variance explained
+fviz_eig(outfield_pca)
+
+# Biplot (players and variables on first two PCs)
+fviz_pca_biplot(outfield_pca, repel = TRUE)
+
+# Contributions of variables to PC1 and PC2
+fviz_pca_var(outfield_pca, 
+             col.var = "contrib",
+             labelsize = 2, repel = TRUE) 
+
+variable_contrib <- data.frame(outfield_pca$var$contrib)
+variable_contrib <- variable_contrib %>%
+  mutate(Total_Contrib = Dim.1 + Dim.2)
+
+# Scale them to sum to 1 (to act as relative weights)
+variable_contrib <- variable_contrib %>%
+  mutate(Weight = Total_Contrib / sum(Total_Contrib))
+
+# 75th percentile threshold
+threshold_75 <- quantile(variable_contrib$Total_Contrib, 0.75)
+print(threshold_75)
+
+# Sorted plot
+sorted_scores <- sort(variable_contrib$Total_Contrib, decreasing = TRUE)
+plot(sorted_scores, type = "l", col = "blue", main = "PCA Score Distribution",
+     ylab = "PCA Score (Dim1 + Dim2)", xlab = "Ranked Goalkeepers")
+
+
+# Find the elbow point
+elbow <- inflection::findiplist(1:length(sorted_scores), sorted_scores, 0)
+print(elbow)
+
+mean_score <- mean(variable_contrib$Total_Contrib)
+sd_score <- sd(variable_contrib$Total_Contrib)
+
+threshold_sd <- mean_score + sd_score
+print(threshold_sd)
+
+plot(density(variable_contrib$Total_Contrib), main = "Density of PCA Scores")
+abline(v = mean_score, col = "red", lty = 2)
+#########
+```
+
+
+```{r}
+
+outfield_dpr <- outfield_data %>% mutate(Defensive_Player_Rtg = ((Tkl_Tackles* variable_contrib["Tkl_Tackles", "Weight"]/TklW_Tackles* variable_contrib["TklW_Tackles", "Weight"])+(Tkl_Challenges* variable_contrib["Tkl_Challenges", "Weight"]/Att_Challenges* variable_contrib["Att_Challenges", "Weight"])+Blocks_Blocks* variable_contrib["Blocks_Blocks", "Weight"]+Int.x* variable_contrib["Int.x", "Weight"]+ Clr* variable_contrib["Clr", "Weight"]-Err*variable_contrib["Err", "Weight"]-CrdY.y* variable_contrib["CrdY.y", "Weight"]-(2*(CrdR.y* variable_contrib["CrdR.y", "Weight"]))-(Fls*variable_contrib["Fls", "Weight"]/Fld*variable_contrib["Fld", "Weight"]) + Recov* variable_contrib["Recov", "Weight"] + (Won_Aerial* variable_contrib["Won_Aerial", "Weight"]/Lost_Aerial* variable_contrib["Lost_Aerial", "Weight"])))
+
+
+outfield_dpr_filtered <- outfield_dpr %>%
+  filter(is.finite(Defensive_Player_Rtg), !is.na(Defensive_Player_Rtg))
+
+
+#> Get the Average possession for every team in the top 5 leagues (will be useful for other metrics too)
+#> For defenders, divide DPR by (100 - Avg. Poss.)
+#> First things first, let's extract the possession data at team level
+
+big5_team_possession <- fb_big5_advanced_season_stats(season_end_year= 2025, stat_type= "possession", team_or_player= "team")
+dplyr::glimpse(big5_team_possession)
+big5_team_possession_opponent <- big5_team_possession %>% filter(Team_or_Opponent == "opponent") %>% select(Squad, Poss)
+big5_team_possession_team <- big5_team_possession %>% filter(Team_or_Opponent == "team") %>% select(Squad, Poss)
+
+outfield_dpr_filtered_possopp <- outfield_dpr_filtered %>% left_join(big5_team_possession_opponent, by = "Squad", relationship = "many-to-many") %>% rename(Poss_Opp = Poss)
+outfield_dpr_filtered_possopp_possteam <- outfield_dpr_filtered_possopp %>% left_join(big5_team_possession_team, by = "Squad", relationship = "many-to-many") %>% rename(Poss_Team = Poss)
+
+outfield_DPR <- outfield_dpr_filtered_possopp_possteam %>% mutate(Poss.Adj.DPR = Defensive_Player_Rtg*100/Poss_Opp) %>% arrange(desc(Poss.Adj.DPR))
+avg_dpr <- mean(outfield_DPR$Poss.Adj.DPR)
+outfield_DPR <- outfield_DPR %>% mutate(Poss.Adj.DPR = (Poss.Adj.DPR/avg_dpr)) %>% arrange(desc(Poss.Adj.DPR))
+
+
+pl_dpr <- outfield_DPR %>% filter(Comp == "Premier League")
+ligue1_dpr <- outfield_DPR %>% filter(Comp == "Ligue 1")
+seriea_dpr <- outfield_DPR %>% filter(Comp == "Serie A")
+bundesliga_dpr <- outfield_DPR %>% filter(Comp == "Bundesliga")
+laliga_dpr <- outfield_DPR %>% filter(Comp == "La Liga")
+
+#> Outfield_DPR is what you have to carry forward because you cannot have players ineligible for any category when it comes to final team ratings
+
+```
+
+### Offensive Creation Rating
+
+```{r}
+#>OFFENSIVE CREATION RATING
+
+outfield_ocr_data <- outfield_data %>% select(Season_End_Year, Squad, Comp, Player, Nation, Pos, Age, Min_Playing.Time, Ast.x, xA_Expected, SCA_SCA, GCA_GCA, KP, Final_Third, PPA, Att_Total, CrsPA, Crs, PrgDist_Total, TotDist_Total, `Att 3rd_Touches`, `Att Pen_Touches`, Touches_Touches, Succ_Take, Att_Take, PrgDist_Carries, TotDist_Carries, Final_Third_Carries, PrgC_Carries, CPA_Carries, Carries_Carries, PrgR_Receiving, Rec_Receiving, Mis_Carries, Dis_Carries, Carries_Carries, PKwon)
+
+colnames(outfield_ocr_data)[21] <- "Att_3rd_Touches"
+colnames(outfield_ocr_data)[22] <- "Att_Pen_Touches"
+
+outfield_above_900 <- outfield_ocr_data%>% filter(Min_Playing.Time >= 900)
+outfield_above_900_complete <- na.omit(outfield_above_900)
+
+outfield_numeric <-outfield_above_900 %>% select(where(is.numeric))
+
+# Optional: remove NAs
+outfield_numeric <- outfield_numeric[, -1]
+outfield_numeric <- na.omit(outfield_numeric)
+
+# Scale the data (important for PCA since units differ)
+outfield_scaled <- scale(outfield_numeric)
+outfield_scaled <- outfield_scaled[ ,-1]
+# Run PCA
+outfield_pca <- PCA(outfield_scaled, graph = FALSE)
+
+# View eigenvalues (variance explained by each component)
+outfield_pca$eig
+
+# Extract variance explained by Dim.1 and Dim.2
+dim1_variance <- outfield_pca$eig[1, "percentage of variance"]
+dim2_variance <- outfield_pca$eig[2, "percentage of variance"]
+
+# Normalize so they sum to 1 (as relative weights)
+total_variance <- dim1_variance + dim2_variance
+dim1_weight <- dim1_variance / total_variance
+dim2_weight <- dim2_variance / total_variance
+
+print(paste("Dim.1 weight:", round(dim1_weight, 3)))
+print(paste("Dim.2 weight:", round(dim2_weight, 3)))
+
+
+
+# Plot the variance explained
+fviz_eig(outfield_pca)
+
+# Biplot (players and variables on first two PCs)
+fviz_pca_biplot(outfield_pca, repel = TRUE)
+
+# Contributions of variables to PC1 and PC2
+fviz_pca_var(outfield_pca, 
+             col.var = "contrib",
+             labelsize = 2, repel = TRUE) 
+
+variable_contrib <- data.frame(outfield_pca$var$contrib)
+variable_contrib <- variable_contrib %>%
+  mutate(Total_Contrib = Dim.1 + Dim.2)
+
+# Scale them to sum to 1 (to act as relative weights)
+variable_contrib <- variable_contrib %>%
+  mutate(Weight = Total_Contrib / sum(Total_Contrib))
+
+# 75th percentile threshold
+threshold_75 <- quantile(variable_contrib$Total_Contrib, 0.75)
+print(threshold_75)
+
+# Sorted plot
+sorted_scores <- sort(variable_contrib$Total_Contrib, decreasing = TRUE)
+plot(sorted_scores, type = "l", col = "blue", main = "PCA Score Distribution",
+     ylab = "PCA Score (Dim1 + Dim2)", xlab = "Ranked Goalkeepers")
+
+
+# Find the elbow point
+elbow <- inflection::findiplist(1:length(sorted_scores), sorted_scores, 0)
+print(elbow)
+
+mean_score <- mean(variable_contrib$Total_Contrib)
+sd_score <- sd(variable_contrib$Total_Contrib)
+
+threshold_sd <- mean_score + sd_score
+print(threshold_sd)
+
+plot(density(variable_contrib$Total_Contrib), main = "Density of PCA Scores")
+abline(v = mean_score, col = "red", lty = 2)
+
+###########
+```
+
+```{r}
+#> OFFENSIVE CREATION RATING
+
+outfield_DPR_ocr <- outfield_above_900 %>% mutate(Off_Creation_Rtg = (((Ast.x *variable_contrib["Ast.x", "Weight"])/(xA_Expected* variable_contrib["xA_Expected", "Weight"]))+ ((SCA_SCA* variable_contrib["SCA_SCA", "Weight"])) + ((GCA_GCA* variable_contrib["GCA_GCA", "Weight"])) +(((KP* variable_contrib["KP", "Weight"]) + (Final_Third * variable_contrib["Final_Third", "Weight"]) + (PPA * variable_contrib["PPA", "Weight"]))/(Att_Total* variable_contrib["Att_Total", "Weight"]))+((CrsPA* variable_contrib["CrsPA", "Weight"])/(Crs* variable_contrib["Crs", "Weight"]))+ ((PrgDist_Total* variable_contrib["PrgDist_Total", "Weight"])/(TotDist_Total* variable_contrib["TotDist_Total", "Weight"]))+ (((Att_3rd_Touches* variable_contrib["Att_3rd_Touches", "Weight"]) + (Att_Pen_Touches* variable_contrib["Att_Pen_Touches", "Weight"]))/(Touches_Touches* variable_contrib["Touches_Touches", "Weight"]))+ ((Succ_Take* variable_contrib["Succ_Take", "Weight"])/(Att_Take* variable_contrib["Att_Take", "Weight"]))+((PrgDist_Carries* variable_contrib["PrgDist_Carries", "Weight"])/(TotDist_Carries* variable_contrib["TotDist_Carries", "Weight"]))+(((Final_Third_Carries* variable_contrib["Final_Third_Carries", "Weight"]) + (PrgC_Carries* variable_contrib["PrgC_Carries", "Weight"]) + (CPA_Carries* variable_contrib["CPA_Carries", "Weight"]))/(Carries_Carries* variable_contrib["Carries_Carries", "Weight"]))+ ((PrgR_Receiving* variable_contrib["PrgR_Receiving", "Weight"])/(Rec_Receiving* variable_contrib["Rec_Receiving", "Weight"])) - (((Mis_Carries* variable_contrib["Mis_Carries", "Weight"])+(Dis_Carries* variable_contrib["Dis_Carries", "Weight"]))/(Carries_Carries* variable_contrib["Carries_Carries", "Weight"])) + (PKwon* variable_contrib["PKwon", "Weight"]))) %>% arrange(desc(Off_Creation_Rtg))
+
+setdiff(c("Ast.x", "xA_Expected", "SCA_SCA", "GCA_GCA", "KP", "Final_Third", "PPA", "Att_Total", "CrsPA", "Crs", "PrgDist_Total", "TotDist_Total", "Att_3rd_Touches", "Att_Pen_Touches", "Touches_Touches", "Succ_Take", "Att_Take", "TotDist_Carries", "Final_Third_Carries", "PrgC_Carries", "CPA_Carries","Carries_Carries", "PrgR_Receiving","Rec_Receiving", "Mis_Carries", "Dis_Carries", "PKwon"), rownames(variable_contrib))
+
+big5_team_possession <- fb_big5_advanced_season_stats(season_end_year= 2025, stat_type= "possession", team_or_player= "team")
+dplyr::glimpse(big5_team_possession)
+big5_team_possession_opponent <- big5_team_possession %>% filter(Team_or_Opponent == "opponent") %>% select(Squad, Poss)
+big5_team_possession_team <- big5_team_possession %>% filter(Team_or_Opponent == "team") %>% select(Squad, Poss)
+
+outfield_DPR_ocr <- outfield_DPR_ocr %>% left_join(big5_team_possession_opponent, by = "Squad", relationship = "many-to-many") %>% rename(Poss_Opp = Poss)
+outfield_DPR_ocr <- outfield_DPR_ocr %>% left_join(big5_team_possession_team, by = "Squad", relationship = "many-to-many") %>% rename(Poss_Team = Poss)
+
+outfield_DPR_ocr_possadj <- outfield_DPR_ocr %>% mutate(Poss.adj.OCR = (Off_Creation_Rtg/Poss_Team)*100) %>% arrange(desc(Poss.adj.OCR))
+outfield_DPR_ocr_possadj <- outfield_DPR_ocr_possadj %>% filter(Poss.adj.OCR != "NaN")
+avg_ocr <- mean(outfield_DPR_ocr_possadj$Poss.adj.OCR)
+outfield_DPR_OCR <- outfield_DPR_ocr_possadj %>% mutate(Poss.adj.OCR = Poss.adj.OCR/avg_ocr) %>% arrange(desc(Poss.adj.OCR))
+
+outfield_DPR_OCR_5ast <- outfield_DPR_OCR %>% filter(Ast.x >= 5)
+
+```
+
+### Goalscorer Rating
+
+```{r}
+#>GOALSCORER RATING
+
+outfield_gsr_data <- outfield_data %>%
+  mutate(
+    Goals_per_xG = ifelse(xG_Expected.x > 0, Gls_Standard / xG_Expected.x, 0),
+    G_per_Shot = ifelse(Sh_Standard > 0, Gls_Standard / Sh_Standard, 0),
+    xG_per_Shot = ifelse(Sh_Standard > 0, xG_Expected.x / Sh_Standard, 0))
+
+
+outfield_gsr_data <- outfield_gsr_data %>% mutate(Gls_per_xG = Gls/xG_Expected.x) %>% select(Season_End_Year, Squad, Comp, Player, Nation, Pos, Age, Min_Playing.Time, Gls, xG_Expected.x, SoT_percent_Standard, Sh_Standard, Gls_Per, xG_Per, PrgR_Receiving, Gls_per_xG, Goals_per_xG, G_per_Shot, xG_per_Shot) %>% filter(!is.nan(Gls_per_xG))
+
+colnames(outfield_gsr_data)[10] <- "xG_Expected"
+
+outfield_above_900 <- outfield_gsr_data%>% filter(Min_Playing.Time >= 900)
+outfield_above_900_complete <- na.omit(outfield_above_900)
+
+outfield_numeric <-outfield_above_900 %>% select(where(is.numeric))
+
+# Optional: remove NAs
+outfield_numeric <- outfield_numeric[, -1]
+outfield_numeric <- na.omit(outfield_numeric)
+
+# Scale the data (important for PCA since units differ)
+outfield_scaled <- scale(outfield_numeric)
+outfield_scaled <- outfield_scaled[ ,-1]
+# Run PCA
+outfield_pca <- PCA(outfield_scaled, graph = FALSE)
+
+# View eigenvalues (variance explained by each component)
+outfield_pca$eig
+
+# Extract variance explained by Dim.1 and Dim.2
+dim1_variance <- outfield_pca$eig[1, "percentage of variance"]
+dim2_variance <- outfield_pca$eig[2, "percentage of variance"]
+
+# Normalize so they sum to 1 (as relative weights)
+total_variance <- dim1_variance + dim2_variance
+dim1_weight <- dim1_variance / total_variance
+dim2_weight <- dim2_variance / total_variance
+
+print(paste("Dim.1 weight:", round(dim1_weight, 3)))
+print(paste("Dim.2 weight:", round(dim2_weight, 3)))
+
+
+
+# Plot the variance explained
+fviz_eig(outfield_pca)
+
+# Biplot (players and variables on first two PCs)
+fviz_pca_biplot(outfield_pca, repel = TRUE)
+
+# Contributions of variables to PC1 and PC2
+fviz_pca_var(outfield_pca, 
+             col.var = "contrib",
+             labelsize = 2, repel = TRUE) 
+
+variable_contrib <- data.frame(outfield_pca$var$contrib)
+variable_contrib <- variable_contrib %>%
+  mutate(Total_Contrib = Dim.1 + Dim.2)
+
+# Scale them to sum to 1 (to act as relative weights)
+variable_contrib <- variable_contrib %>%
+  mutate(Weight = Total_Contrib / sum(Total_Contrib))
+
+# 75th percentile threshold
+threshold_75 <- quantile(variable_contrib$Total_Contrib, 0.75)
+print(threshold_75)
+
+# Sorted plot
+sorted_scores <- sort(variable_contrib$Total_Contrib, decreasing = TRUE)
+plot(sorted_scores, type = "l", col = "blue", main = "PCA Score Distribution",
+     ylab = "PCA Score (Dim1 + Dim2)", xlab = "Ranked Goalkeepers")
+
+
+# Find the elbow point
+elbow <- inflection::findiplist(1:length(sorted_scores), sorted_scores, 0)
+print(elbow)
+
+mean_score <- mean(variable_contrib$Total_Contrib)
+sd_score <- sd(variable_contrib$Total_Contrib)
+
+threshold_sd <- mean_score + sd_score
+print(threshold_sd)
+
+plot(density(variable_contrib$Total_Contrib), main = "Density of PCA Scores")
+abline(v = mean_score, col = "red", lty = 2)
+
+###########
+
+```
+
+```{r}
+#> GOALSCORER RATING
+#Verify if the goals are per 90 or per shot - think they might be per 90
+outfield_DPR_OCR_gsr <- outfield_gsr_data %>% filter(Min_Playing.Time > 900) %>% mutate(GoalScorer_Rtg = ((Gls * variable_contrib["Gls", "Weight"]) +
+    (ifelse(xG_Expected > 0, Gls / xG_Expected, 0) * variable_contrib["Gls_per_xG", "Weight"]) +
+    (SoT_percent_Standard * variable_contrib["SoT_percent_Standard", "Weight"]) +
+    (ifelse(Sh_Standard > 0, Gls / Sh_Standard, 0) * variable_contrib["G_per_Shot", "Weight"]) +
+    (xG_per_Shot * variable_contrib["xG_per_Shot", "Weight"]) +
+    (PrgR_Receiving * variable_contrib["PrgR_Receiving", "Weight"])
+) / Min_Playing.Time) %>% arrange(desc(GoalScorer_Rtg))
+
+
+outfield_gsr_awards <- outfield_DPR_OCR_gsr %>% filter(Min_Playing.Time >= 2160)
+outfield_GSR <- outfield_DPR_OCR_gsr #Save this object alone
+```
+
+#### Sanity check GSR with xG
+
+```{r}
+#Correlation work between GA and GKR
+
+cor(outfield_GSR$GoalScorer_Rtg, outfield_GSR$Gls_Per, use = "complete.obs", method = "spearman")
+cor(outfield_GSR$GoalScorer_Rtg, outfield_GSR$xG_Per, use = "complete.obs", method = "spearman")
+
+summary_model_GSR <- lm(Gls_Per ~ GoalScorer_Rtg, data = outfield_GSR)
+summary(summary_model_GSR)$r.squared
+
+```
+
+### Reassigning a few table names
+
+```{r}
+outfield_OCR <- outfield_DPR_OCR
+```
+
+## Overall Player Ratings
+#### Take the four ratings dataframes and join them before doing clustering on them
+
+```{r}
+outfield_DPR_filtered <- outfield_DPR %>% select(Squad, Comp, Player, Pos, Poss.Adj.DPR, Min_Playing.Time)
+outfield_OCR_filtered <- outfield_OCR %>% select(Squad, Comp, Player, Pos, Poss.adj.OCR, Min_Playing.Time)
+outfield_GSR_filtered <- outfield_GSR %>% select(Squad, Comp, Player, Pos, GoalScorer_Rtg, Min_Playing.Time)
+
+player_master <- full_join(outfield_DPR_filtered, outfield_OCR_filtered, by = "Player") %>% full_join(outfield_GSR_filtered, by = "Player") 
+
+player_master <- player_master %>%
+  mutate(
+    DPR_std = (Poss.Adj.DPR - min(Poss.Adj.DPR, na.rm=TRUE)) / (max(Poss.Adj.DPR, na.rm=TRUE) - min(Poss.Adj.DPR, na.rm=TRUE)),
+    OCR_std = (Poss.adj.OCR - min(Poss.adj.OCR, na.rm=TRUE)) / (max(Poss.adj.OCR, na.rm=TRUE) - min(Poss.adj.OCR, na.rm=TRUE)),
+    GSR_std = (GoalScorer_Rtg - min(GoalScorer_Rtg, na.rm=TRUE)) / (max(GoalScorer_Rtg, na.rm=TRUE) - min(GoalScorer_Rtg, na.rm=TRUE))
+  )
+
+player_master <- player_master %>%  mutate(
+    Squad= coalesce(Squad, Squad.x, Squad.y),
+    Comp= coalesce(Comp, Comp.x, Comp.y),
+    Pos = coalesce(Pos.x, Pos.y, Pos),
+    Min_Playing_Time = coalesce(Min_Playing.Time.x, Min_Playing.Time.y, Min_Playing.Time))
+
+player_master_final <- player_master %>% select(Player, Squad, Comp, Pos, Poss.Adj.DPR, Poss.adj.OCR, GoalScorer_Rtg, DPR_std, OCR_std, GSR_std, Min_Playing_Time)
+```
+
+
+### Cluster the players to look for any natural clusterings then run PCA on each cluster
+
+```{r}
+player_clustering <- player_master_final %>%
+  select(DPR_std, OCR_std, GSR_std) %>%
+  mutate(across(everything(), ~ ifelse(is.na(.), 0, .)))
+
+wss <- function(k) {
+  kmeans(player_clustering, k, nstart = 25)$tot.withinss
+}
+
+k.values <- 1:10
+wss_values <- map_dbl(k.values, wss)
+
+plot(k.values, wss_values, type = "b",
+     pch = 19, frame = FALSE, 
+     xlab = "Number of clusters K",
+     ylab = "Total within-clusters sum of squares")
+
+library(cluster)
+
+sil_width <- function(k){
+  pam(player_clustering, k)$silinfo$avg.width
+}
+
+k.values <- 2:10
+sil_values <- map_dbl(k.values, sil_width)
+
+plot(k.values, sil_values, type = "b", pch = 19,
+     xlab = "Number of clusters",
+     ylab = "Average silhouette width")
+
+```
+
+```{r}
+set.seed(2025)
+kmeans_result <- kmeans(player_clustering, centers = 2, nstart = 25)
+
+player_master_final$Cluster <- kmeans_result$cluster
+
+```
+
+```{r}
+run_pca_weights <- function(data_numeric){
+  # Perform PCA
+  pca <- PCA(data_numeric, graph = FALSE)
+  
+  # Extract eigenvalues (variance explained by each component)
+  eig <- pca$eig
+  
+  # Extract contributions of variables to PC1 and PC2
+  var_contrib <- data.frame(pca$var$contrib)
+  
+  # Sum contribution of Dim.1 and Dim.2 and scale them to sum to 1
+  var_contrib <- var_contrib %>%
+    mutate(Total_Contrib = Dim.1 + Dim.2,
+           Weight = Total_Contrib / sum(Total_Contrib))
+  
+  # Return PCA object, weights, and eigenvalues
+  return(list(pca = pca, weights = var_contrib, eig = eig))
+}
+
+player_clustering_final <- player_clustering
+player_clustering_final$Player <- player_master_final$Player
+player_clustering_final$Squad <- player_master_final$Squad
+player_clustering_final$Comp <- player_master_final$Comp
+player_clustering_final$Pos <- player_master_final$Pos
+player_clustering_final$Cluster <- player_master_final$Cluster
+player_clustering_final$Min_Playing_Time <- player_master_final$Min_Playing_Time
+
+
+clustered_pca_results <- player_clustering_final %>% 
+  group_split(Cluster) %>% 
+  map(~run_pca_weights(.x %>% select(DPR_std, OCR_std, GSR_std)))
+
+
+```
+
+```{r}
+cluster_weights <- map(clustered_pca_results, ~.x$weights %>% select(Weight) %>% rownames_to_column("Metric"))
+names(cluster_weights) <- paste0("Cluster_", 1:length(cluster_weights))
+
+player_clusters <- player_clustering_final %>% group_split(Cluster)
+
+cluster_ratings <- map2(
+  player_clusters,
+  cluster_weights,
+  ~ .x %>% mutate(
+    Overall_Rating =
+      DPR_std * .y$Weight[.y$Metric == "DPR_std"] +
+      OCR_std * .y$Weight[.y$Metric == "OCR_std"] +
+      GSR_std * .y$Weight[.y$Metric == "GSR_std"]
+  )
+)
+
+player_master_final <- bind_rows(cluster_ratings)
+player_master_final <- player_master_final %>% arrange(desc(Overall_Rating))
+
+pl_ratings_final <- player_master_final %>% filter(Comp == "Premier League")
+laliga_ratings_final <- player_master_final %>% filter(Comp == "La Liga")
+ligue1_ratings_final <- player_master_final %>% filter(Comp == "Ligue 1")
+bundesliga_ratings_final <- player_master_final %>% filter(Comp == "Bundesliga")
+seriea_ratings_final <- player_master_final %>% filter(Comp == "Serie A")
+
+```
+
+### Finally decide the awards and the team of the year based on minutes - 2260 minutes played (24 games)
+
+```{r}
+player_master_awards <- player_master_final %>% filter(Min_Playing_Time >= 2260)
+pl_ratings_awards <- pl_ratings_final %>% filter(Min_Playing_Time >= 2260)
+laliga_ratings_awards <- laliga_ratings_final %>% filter(Min_Playing_Time >= 2260)
+ligue1_ratings_awards <- ligue1_ratings_final %>% filter(Min_Playing_Time >= 2260)
+seriea_ratings_awards <- seriea_ratings_final %>% filter(Min_Playing_Time >= 2260)
+bundesliga_ratings_awards <- bundesliga_ratings_final %>% filter(Min_Playing_Time >= 2260)
+
+head(player_master_awards)
+head(pl_ratings_awards)
+head(laliga_ratings_awards)
+head(ligue1_ratings_awards)
+head(seriea_ratings_awards)
+head(bundesliga_ratings_awards)
+
+```
+
+## Average Player Rating of Each League
+
+```{r}
+print(median(pl_ratings_final$Overall_Rating))
+print(median(laliga_ratings_final$Overall_Rating))
+print(median(ligue1_ratings_final$Overall_Rating))
+print(median(bundesliga_ratings_final$Overall_Rating))
+print(median(seriea_ratings_final$Overall_Rating))
+
+
+```
