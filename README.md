@@ -2,7 +2,7 @@
 
 A multidimensional player rating system for outfield players and goalkeepers across the **Big 5 European leagues**, built entirely in R using publicly available FBRef data. Ratings are produced for four consecutive seasons: **2021–22, 2022–23, 2023–24, and 2024–25**.
 
-**This project is currently halted due to Opta stopping their supply of data to Football Reference and the lack of maintenance of worldfootballR**
+**This project is currently halted due to Opta stopping their supply of data to Football Reference and the archiving of worldfootballR**
 
 ---
 
