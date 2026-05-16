@@ -18,7 +18,7 @@ REvSoc constructs statistically grounded, position-aware performance ratings for
 
 **R_Repository** - Has the RMarkdown and RData files for the project
 
-**Summary_Results_File** - Excel sheet with a summary of results across all the files in the repository. For a quick glance at the results.
+**Summary_Results_Table** - Excel sheet with a summary of results across all the files in the repository. For a quick glance at the results.
 
 ---
 
