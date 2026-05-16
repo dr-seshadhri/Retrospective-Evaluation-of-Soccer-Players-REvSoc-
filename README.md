@@ -15,9 +15,7 @@ REvSoc constructs statistically grounded, position-aware performance ratings for
 **Goalkeeper_Ratings** - Has the goalkeeper ratings for the top five leagues from 2021-22 to 2024-25
 **Outfield_Ratings** - Has the outfielder ratings for the 2024-25 season from all five leagues. Unfortunately, the other seasons could not be done as worldfootballR was archived before I could save the data.
 **R_Repository** - Has the RMarkdown and RData files for the project
-
-
-
+**Summary_Results_File** - Excel sheet with a summary of results across all the files in the repository. For a quick glance at the results.
 
 ---
 
