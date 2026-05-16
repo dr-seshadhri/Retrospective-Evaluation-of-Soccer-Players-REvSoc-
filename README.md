@@ -42,8 +42,8 @@ Both components are normalised relative to their league averages and combined in
 
 Principal Component Analysis (PCA) is run on all scaled goalkeeper metrics. The variance explained by **Dim 1** (36.1%) and **Dim 2** (16.7%) is used to derive relative weights:
 
-- Dim 1 weight: **0.684**
-- Dim 2 weight: **0.316**
+- Dim 1 weight: **~0.7**
+- Dim 2 weight: **~0.3**
 
 Variable contributions to each principal component determine which metrics carry the most influence in the final rating.
 
