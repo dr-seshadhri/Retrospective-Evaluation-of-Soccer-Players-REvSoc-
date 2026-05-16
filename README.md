@@ -10,6 +10,13 @@ A multidimensional player rating system for outfield players and goalkeepers acr
 
 REvSoc constructs statistically grounded, position-aware performance ratings for every player in the Premier League, La Liga, Serie A, Bundesliga, and Ligue 1 who meets a minimum minutes threshold of 900 minutes to qualify for a rating and 2160 minutes (equivalent to playing 24 league matches) and to qualify for awards/top 'n' players lists (n is an integer > 0) . The system separates goalkeepers from outfield players due to the inherent different nature of requirements for goalkeepers and, within outfield players, decomposes performance into three distinct dimensions before combining them into an overall rating validated against real-world outcomes. Outfield players are considered as one group because in football they all have to defend and attack but the difference between different groups and roles is how much of defending and attacking they do (for example, a striker's attacking work outweighs his defensive work significantly and vice versa for a centre-back)
 
+### Folder Descriptions 
+
+Goalkeeper_Ratings - Has the goalkeeper ratings for the top five leagues from 2021-22 to 2024-25
+Outfield_Ratings - Has the outfielder ratings for the 2024-25 season from all five leagues. Unfortunately, the other seasons could not be done as worldfootballR was archived before I could save the data.
+
+
+
 ---
 
 ## Data Source
