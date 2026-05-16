@@ -89,7 +89,7 @@ Validated against goals per 90 (Spearman ρ ≈ 0.65) and against xG per 90 (ρ 
 
 ## Overall Player Rating & Clustering
 
-After computing DPR, OCR, and GSR, all three are min-max normalised (`_std` suffix) and joined into a single player master table. Players are then:
+After computing DPR, OCR, and GSR, all three are min-max normalised and joined into a single player master table. Players are then:
 
 1. **Clustered** using k-means (k determined by the elbow method and silhouette width via PAM) — typically two clusters emerging from the DPR/OCR/GSR space.
 2. **PCA run within each cluster** to derive cluster-specific metric weights.
@@ -101,7 +101,7 @@ This approach means the relative importance of defending, creating, and scoring 
 
 ## Team Ratings
 
-Individual player ratings are aggregated to a **Weighted Team Rating** by computing a minutes-weighted average of Overall Ratings for each squad. This is validated against final league table position using Spearman correlation across all five leagues.
+Individual player ratings are aggregated to a **Weighted Team Rating** by computing a minutes-weighted average of Overall Ratings for each squad. This is validated against final league table position using Spearman correlation across all five leagues. This still needs work and it was interesting to see that the correlations were not necessarily holding up throughout the seasons.
 
 ---
 
