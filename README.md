@@ -65,13 +65,13 @@ Outfield players are rated across three independent dimensions, each possession-
 
 ### 1. Defensive Player Rating (DPR)
 
-Built from defensive and miscellaneous FBRef stat types. Adjusted for team possession — defenders playing for lower-possession teams face more defensive work, so DPR is scaled by `(100 - avg_team_possession)` to produce a **Possession-Adjusted DPR**.
+Built from defensive and miscellaneous FBRef stat types. Adjusted for opposition team possession — defenders playing for lower-possession teams face more defensive work, so DPR is scaled by `(100 - avg_team_possession)` to produce a **Possession-Adjusted DPR**.
 
 Feature selection uses the **Boruta** algorithm to identify which defensive metrics genuinely contribute to the rating, rather than relying on arbitrary metric choices.
 
 ### 2. Offensive Creation Rating (OCR)
 
-Captures chance creation and progressive ball-carrying, including: assists, xA, SCA, GCA, key passes, progressive passes into the final third, penalty area passes, and crosses. Adjusted by **opponent possession** (to reflect the difficulty of creating against high-possession sides) and normalised to the league average.
+Captures chance creation and progressive ball-carrying, including: assists, xA, SCA, GCA, key passes, progressive passes into the final third, penalty area passes, and crosses. Adjusted by **possession** (to determine who makes the most use of every percentage of possession for creation) and normalised to the league average.
 
 ### 3. Goalscorer Rating (GSR)
 
